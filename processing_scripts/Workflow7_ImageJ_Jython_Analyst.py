@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-#  Copyright (C) 2017 University of Dundee. All rights reserved.
+#  Copyright (C) 2018 University of Dundee. All rights reserved.
 #
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -17,7 +17,7 @@
 #
 #------------------------------------------------------------------------------
 
-# This Jython script uses ImageJ to Subtract Background.
+# This Jython script uses ImageJ to segment the image and save ROI's and results table back to OMERO.
 # The purpose of the script is to be used in the Scripting Dialog
 # of Fiji.
 # Error handling is omitted to ease the reading of the script but this should be added
@@ -25,9 +25,13 @@
 # Information can be found at https://docs.openmicroscopy.org/omero/5.4.1/developers/Java.html
 
 import os
+import math
+import string
 from os import path
 
 from java.lang import Long
+from java.lang import Float
+from java.lang import Double
 from java.lang import String
 from java.lang import System
 from java.lang import Math
@@ -46,7 +50,7 @@ from omero.gateway.facility import BrowseFacility
 from omero.gateway.facility import AdminFacility
 from omero.gateway.facility import DataManagerFacility
 from omero.gateway.facility import RawDataFacility
-from omero.gateway.facility import ROIFacility
+from omero.gateway.facility import ROIFacility, TablesFacility
 from omero.gateway.model import DatasetData
 from omero.log import Logger
 from omero.log import SimpleLogger
@@ -70,6 +74,11 @@ from loci.plugins.util import ImageProcessorReader
 from ij import IJ, ImagePlus, ImageStack, CompositeImage
 from ij.process import ByteProcessor, ShortProcessor
 from ij.process import ImageProcessor
+from ij.plugin.frame import RoiManager
+from ij.measure import ResultsTable
+
+from java.lang import Object
+from omero.gateway.model import TableData, TableDataColumn
 
 
 # Setup
@@ -81,11 +90,11 @@ PORT = 4064
 group_id = -1
 #  parameters to edit
 image_id = 4528
-USERNAME = ""
+USERNAME = "analyst"
 PASSWORD = ""
 
 # If you want to do analysis for someone else:
-# Mention their username here (you need to have light-admin previliges)
+# Specify their username here (you need to have restricted-admin/admin priviliges)
 target_user = "user-1"
 
 # Connection method: returns a gateway object
@@ -174,8 +183,9 @@ def openOmeroImage(ctx, image_id):
                 elif q.typecode == 'h':
                     ip = ShortProcessor(sizeX, sizeY, q, None)
                 stack.addSlice('', ip)
-    # Do something
-    imp = ImagePlus(image.getName(), stack)
+
+    image_name = image.getName() + '--OMERO ID:' + str(image.getId())
+    imp = ImagePlus(image_name, stack)
     imp.setDimensions(sizeC, sizeZ, sizeT)
     imp.setOpenAsHyperStack(True)
     imp.show()
@@ -209,7 +219,37 @@ def upload_image(path, gateway, id):
     reader.setMetadataOptions(DefaultMetadataOptions(MetadataLevel.ALL))
     return library.importCandidates(config, candidates)
 
+def convertToOmeroTable(rt, ctx, image_id):
+    no_of_columns = rt.getLastColumn()
+    no_of_rows = rt.size()
+    columns = [TableDataColumn] * no_of_columns
+    data =  [[Object] * no_of_rows] * no_of_columns
 
+    for c in range(0,no_of_columns):
+        colname = rt.getColumnHeading(c)
+        columns[c] = TableDataColumn(colname, c, Double)
+        cols = rt.getColumnAsDoubles(c)
+        if cols is None:
+            continue
+        for r, j in enumerate(cols):
+            cellData = j
+            data[c][r] = cellData
+
+    table_data = TableData(columns, data)
+    browse = gateway.getFacility(BrowseFacility)
+    image = browse.getImage(ctx, long(image_id))
+    table_facility = gateway.getFacility(TablesFacility)
+    table_data = table_facility.addTable(ctx, image, "ImageJ Data", table_data)
+    return table_data
+
+def saveROIsToOmero(ctx, image_id, imp):
+    #Save ROI's back to OMERO
+    reader = ROIReader()
+    roi_list = reader.readImageJROIFromSources(image_id, imp)
+    roi_facility = gateway.getFacility(ROIFacility)
+    result = roi_facility.saveROIs(ctx, image_id, exp_id, roi_list)
+    return result
+    
 # Prototype analysis example
 gateway = connect_to_omero()
 ctx = SecurityContext(group_id)
@@ -228,9 +268,9 @@ imp = openOmeroImage(ctx, image_id)
 #Some analysis which creates ROI's and Results Table
 IJ.setAutoThreshold(imp, "Default dark")
 IJ.run(imp, "Analyze Particles...", "clear add stack")
-
-#Save ROI's back to OMERO
-reader = ROIReader()
-roi_list = reader.readImageJROIFromSources(image_id, imp)
-roi_facility = gateway.getFacility(ROIFacility)
-result = roi_facility.saveROIs(ctx, image_id, exp_id, roi_list)
+IJ.run("Set Measurements...", "area mean standard modal min centroid center perimeter bounding fit shape feret's integrated median skewness kurtosis area_fraction stack display redirect=None decimal=3");
+rm = RoiManager.getInstance()
+rm.runCommand(imp,"Measure");
+rt = ResultsTable.getResultsTable()
+convertToOmeroTable(rt, ctx, image_id)
+saveROIsToOmero(ctx, image_id, imp)
