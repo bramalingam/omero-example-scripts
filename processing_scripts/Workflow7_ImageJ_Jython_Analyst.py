@@ -17,9 +17,10 @@
 #
 #------------------------------------------------------------------------------
 
-# This Jython script uses ImageJ to segment the image and save ROI's and results table back to OMERO.
+# This Jython script uses ImageJ to segment the image and save ROI's and results table back to OMERO
+# using the OMERO Java Gateway. 
 # The purpose of the script is to be used in the Scripting Dialog
-# of Fiji.
+# of Fiji. Please select the language as Python in the Language menu, before running this script.
 # Error handling is omitted to ease the reading of the script but this should be added
 # if used in production to make sure the services are closed
 # Information can be found at https://docs.openmicroscopy.org/omero/5.4.1/developers/Java.html
