@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-#  Copyright (C) 2018 University of Dundee. All rights reserved.
+#  Copyright (C) 2017 University of Dundee. All rights reserved.
 #
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -17,10 +17,9 @@
 #
 #------------------------------------------------------------------------------
 
-# This Jython script uses ImageJ to segment the image and save ROI's and results table back to OMERO
-# using the OMERO Java Gateway. 
+# This Jython script uses ImageJ to Subtract Background.
 # The purpose of the script is to be used in the Scripting Dialog
-# of Fiji. Please select the language as Python in the Language menu, before running this script.
+# of Fiji.
 # Error handling is omitted to ease the reading of the script but this should be added
 # if used in production to make sure the services are closed
 # Information can be found at https://docs.openmicroscopy.org/omero/5.4.1/developers/Java.html
@@ -86,16 +85,16 @@ from omero.gateway.model import TableData, TableDataColumn
 # =====
 
 # OMERO Server details
-HOST = "outreach.openmicroscopy.org"
+HOST = ""
 PORT = 4064
 group_id = -1
 #  parameters to edit
-image_id = 4528
+image_id = 101
 USERNAME = "analyst"
 PASSWORD = ""
 
 # If you want to do analysis for someone else:
-# Specify their username here (you need to have restricted-admin/admin priviliges)
+# Mention their username here (you need to have light-admin previliges)
 target_user = "user-1"
 
 # Connection method: returns a gateway object
@@ -184,7 +183,7 @@ def openOmeroImage(ctx, image_id):
                 elif q.typecode == 'h':
                     ip = ShortProcessor(sizeX, sizeY, q, None)
                 stack.addSlice('', ip)
-
+    # Do something
     image_name = image.getName() + '--OMERO ID:' + str(image.getId())
     imp = ImagePlus(image_name, stack)
     imp.setDimensions(sizeC, sizeZ, sizeT)
@@ -223,24 +222,25 @@ def upload_image(path, gateway, id):
 def convertToOmeroTable(rt, ctx, image_id):
     no_of_columns = rt.getLastColumn()
     no_of_rows = rt.size()
+
+    data = [[Double.valueOf(0) for x in range(no_of_rows)] for y in range(no_of_columns)]
     columns = [TableDataColumn] * no_of_columns
-    data =  [[Object] * no_of_rows] * no_of_columns
 
     for c in range(0,no_of_columns):
         colname = rt.getColumnHeading(c)
-        columns[c] = TableDataColumn(colname, c, Double)
-        cols = rt.getColumnAsDoubles(c)
-        if cols is None:
+        columns[c] = TableDataColumn(colname, c, Double)  
+        rows = rt.getColumnAsDoubles(c) 
+        if rows is None:
             continue
-        for r, j in enumerate(cols):
-            cellData = j
-            data[c][r] = cellData
+        for r in range(0,no_of_rows):
+            data[c][r] = rows[r]
 
     table_data = TableData(columns, data)
+    fac = gateway.getFacility(TablesFacility);
     browse = gateway.getFacility(BrowseFacility)
     image = browse.getImage(ctx, long(image_id))
     table_facility = gateway.getFacility(TablesFacility)
-    table_data = table_facility.addTable(ctx, image, "ImageJ Data", table_data)
+    table_data = table_facility.addTable(ctx, image, "Test_Table", table_data)
     return table_data
 
 def saveROIsToOmero(ctx, image_id, imp):
@@ -258,7 +258,7 @@ exp = gateway.getLoggedInUser()
 exp_id = exp.getId()
 
 # get all images_ids in an omero dataset
-dataset_id = 1107
+dataset_id = 51
 ids = get_image_ids(gateway, ctx, dataset_id)
 
 #if target_user ~= None:
@@ -266,9 +266,9 @@ ids = get_image_ids(gateway, ctx, dataset_id)
 ctx = switchSecurityContext(ctx, target_user)
 imp = openOmeroImage(ctx, image_id)
 
-#Some analysis which creates ROI's and Results Table
+##Some analysis which creates ROI's and Results Table
 IJ.setAutoThreshold(imp, "Default dark")
-IJ.run(imp, "Analyze Particles...", "clear add stack")
+IJ.run(imp, "Analyze Particles...", "size=50-Infinity clear add stack")
 IJ.run("Set Measurements...", "area mean standard modal min centroid center perimeter bounding fit shape feret's integrated median skewness kurtosis area_fraction stack display redirect=None decimal=3");
 rm = RoiManager.getInstance()
 rm.runCommand(imp,"Measure");
