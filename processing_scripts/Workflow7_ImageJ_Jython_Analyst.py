@@ -95,7 +95,7 @@ PASSWORD = ""
 
 # If you want to do analysis for someone else:
 # Mention their username here (you need to have light-admin previliges)
-target_user = "user-1"
+target_user = ""
 
 # Connection method: returns a gateway object
 def connect_to_omero():
@@ -219,24 +219,39 @@ def upload_image(path, gateway, id):
     reader.setMetadataOptions(DefaultMetadataOptions(MetadataLevel.ALL))
     return library.importCandidates(config, candidates)
 
-def convertToOmeroTable(rt, ctx, image_id):
-    no_of_columns = rt.getLastColumn()
+def convertToOmeroTable(rt, ctx, image_id, roivec):
+
+    roivec_cols = ['ROI-id', 'Shape-id', 'Z', 'C', 'T', 'Comment']
+    no_of_columns = rt.getLastColumn() + len(roivec_cols)
     no_of_rows = rt.size()
 
     data = [[Double.valueOf(0) for x in range(no_of_rows)] for y in range(no_of_columns)]
     columns = [TableDataColumn] * no_of_columns
 
     for c in range(0,no_of_columns):
-        colname = rt.getColumnHeading(c)
-        columns[c] = TableDataColumn(colname, c, Double)  
-        rows = rt.getColumnAsDoubles(c) 
+        
+        if c<5:
+            colname = roivec_cols[c]
+            rows = [Double.valueOf(i[c]) for i in roivec]
+            columns[c] = TableDataColumn(colname, c, Double)
+        elif(c==5):
+            colname = roivec_cols[c]
+            rows = [i[c] for i in roivec]
+            columns[c] = TableDataColumn(colname, c, String)
+        else:
+            colname = rt.getColumnHeading(c-len(roivec_cols))
+            rows = rt.getColumnAsDoubles(c-len(roivec_cols))
+            columns[c] = TableDataColumn(colname, c, Double)
+        
         if rows is None:
             continue
         for r in range(0,no_of_rows):
             data[c][r] = rows[r]
 
+    print data[0][0]
     table_data = TableData(columns, data)
     fac = gateway.getFacility(TablesFacility);
+    
     browse = gateway.getFacility(BrowseFacility)
     image = browse.getImage(ctx, long(image_id))
     table_facility = gateway.getFacility(TablesFacility)
@@ -249,7 +264,27 @@ def saveROIsToOmero(ctx, image_id, imp):
     roi_list = reader.readImageJROIFromSources(image_id, imp)
     roi_facility = gateway.getFacility(ROIFacility)
     result = roi_facility.saveROIs(ctx, image_id, exp_id, roi_list)
-    return result
+
+    roivec = []
+
+    j = result.iterator()
+    while (j.hasNext()):
+        roidata = j.next()
+        roi_id = roidata.getId()
+
+        i = roidata.getIterator()
+        while(i.hasNext()):
+            roi = i.next()
+            shape = roi[0]
+            t = shape.getZ()
+            z = shape.getT()
+            c = shape.getC()
+            shape_id = shape.getId()
+            comment = ''
+            if shape.getText():
+                comment = shape.getText()
+            roivec.append([roi_id, shape_id, z, c, t, comment])
+    return roivec
     
 # Prototype analysis example
 gateway = connect_to_omero()
@@ -273,5 +308,5 @@ IJ.run("Set Measurements...", "area mean standard modal min centroid center peri
 rm = RoiManager.getInstance()
 rm.runCommand(imp,"Measure");
 rt = ResultsTable.getResultsTable()
-convertToOmeroTable(rt, ctx, image_id)
-saveROIsToOmero(ctx, image_id, imp)
+roivec = saveROIsToOmero(ctx, image_id, imp)
+convertToOmeroTable(rt, ctx, image_id, roivec)
